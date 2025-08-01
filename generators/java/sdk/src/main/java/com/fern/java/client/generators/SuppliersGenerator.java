@@ -34,6 +34,8 @@ import javax.lang.model.element.Modifier;
 public final class SuppliersGenerator extends AbstractFileGenerator {
 
     public static final String MEMOIZE_METHOD_NAME = "memoize";
+    
+    // Helper method for thread-safe memoization
 
     public SuppliersGenerator(AbstractGeneratorContext<?, ?> generatorContext) {
         super(generatorContext.getPoetClassNameFactory().getCoreClassName("Suppliers"), generatorContext);
@@ -61,6 +63,9 @@ public final class SuppliersGenerator extends AbstractFileGenerator {
         TypeName genericSupplier = ParameterizedTypeName.get(ClassName.get(Supplier.class), genericType);
         TypeName genericAtomicReference = ParameterizedTypeName.get(ClassName.get(AtomicReference.class), genericType);
         return MethodSpec.methodBuilder(MEMOIZE_METHOD_NAME)
+                .addJavadoc("Returns a supplier which caches the result of the delegate supplier.\n")
+                .addJavadoc("@param delegate the supplier whose result should be cached\n")
+                .addJavadoc("@return a memoizing supplier\n")
                 .addModifiers(Modifier.PUBLIC, Modifier.STATIC)
                 .addTypeVariable(genericType)
                 .returns(genericSupplier)
