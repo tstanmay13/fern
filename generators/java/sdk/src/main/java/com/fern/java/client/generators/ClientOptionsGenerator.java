@@ -84,6 +84,14 @@ public final class ClientOptionsGenerator extends AbstractFileGenerator {
                     TypeName.INT, "maxRetries", Modifier.PRIVATE, Modifier.FINAL)
             .build();
 
+    private static final FieldSpec RETRY_BASE_DELAY_FIELD = FieldSpec.builder(
+                    TypeName.LONG, "retryBaseDelay", Modifier.PRIVATE, Modifier.FINAL)
+            .build();
+
+    private static final FieldSpec RETRY_MAX_DELAY_FIELD = FieldSpec.builder(
+                    TypeName.LONG, "retryMaxDelay", Modifier.PRIVATE, Modifier.FINAL)
+            .build();
+
     private final ClassName builderClassName;
     private final FieldSpec environmentField;
     private final GeneratedJavaFile requestOptionsFile;
@@ -142,6 +150,10 @@ public final class ClientOptionsGenerator extends AbstractFileGenerator {
                         .build())
                 .addParameter(ParameterSpec.builder(TIMEOUT_FIELD.type, TIMEOUT_FIELD.name)
                         .build())
+                .addParameter(ParameterSpec.builder(RETRY_BASE_DELAY_FIELD.type, RETRY_BASE_DELAY_FIELD.name)
+                        .build())
+                .addParameter(ParameterSpec.builder(RETRY_MAX_DELAY_FIELD.type, RETRY_MAX_DELAY_FIELD.name)
+                        .build())
                 .addParameters(variableFields.values().stream()
                         .map(fieldSpec -> ParameterSpec.builder(fieldSpec.type, fieldSpec.name)
                                 .build())
@@ -158,7 +170,9 @@ public final class ClientOptionsGenerator extends AbstractFileGenerator {
                         platformHeadersPutString)
                 .addStatement("this.$L = $L", HEADER_SUPPLIERS_FIELD.name, HEADER_SUPPLIERS_FIELD.name)
                 .addStatement("this.$L = $L", OKHTTP_CLIENT_FIELD.name, OKHTTP_CLIENT_FIELD.name)
-                .addStatement("this.$L = $L", TIMEOUT_FIELD.name, TIMEOUT_FIELD.name);
+                .addStatement("this.$L = $L", TIMEOUT_FIELD.name, TIMEOUT_FIELD.name)
+                .addStatement("this.$L = $L", RETRY_BASE_DELAY_FIELD.name, RETRY_BASE_DELAY_FIELD.name)
+                .addStatement("this.$L = $L", RETRY_MAX_DELAY_FIELD.name, RETRY_MAX_DELAY_FIELD.name);
 
         addApiVersionToConstructor(constructorBuilder);
 
@@ -173,6 +187,8 @@ public final class ClientOptionsGenerator extends AbstractFileGenerator {
                 .addField(HEADER_SUPPLIERS_FIELD)
                 .addField(OKHTTP_CLIENT_FIELD)
                 .addField(TIMEOUT_FIELD)
+                .addField(RETRY_BASE_DELAY_FIELD)
+                .addField(RETRY_MAX_DELAY_FIELD)
                 .addFields(variableFields.values())
                 .addMethod(constructorBuilder.build())
                 .addMethod(environmentGetter)
@@ -422,6 +438,12 @@ public final class ClientOptionsGenerator extends AbstractFileGenerator {
                                 Modifier.PRIVATE)
                         .initializer("$T.empty()", Optional.class)
                         .build())
+                .addField(FieldSpec.builder(TypeName.LONG, RETRY_BASE_DELAY_FIELD.name, Modifier.PRIVATE)
+                        .initializer("100L")
+                        .build())
+                .addField(FieldSpec.builder(TypeName.LONG, RETRY_MAX_DELAY_FIELD.name, Modifier.PRIVATE)
+                        .initializer("10000L")
+                        .build())
                 .addField(FieldSpec.builder(OkHttpClient.class, OKHTTP_CLIENT_FIELD.name, Modifier.PRIVATE)
                         .initializer(CodeBlock.builder().add("null").build())
                         .build())
@@ -453,6 +475,22 @@ public final class ClientOptionsGenerator extends AbstractFileGenerator {
                         .returns(builderClassName)
                         .addParameter(TypeName.INT, MAX_RETRIES_FIELD.name)
                         .addStatement("this.$L = $L", MAX_RETRIES_FIELD.name, MAX_RETRIES_FIELD.name)
+                        .addStatement("return this")
+                        .build())
+                .addMethod(MethodSpec.methodBuilder(RETRY_BASE_DELAY_FIELD.name)
+                        .addModifiers(Modifier.PUBLIC)
+                        .addJavadoc("Override the base delay for exponential backoff in milliseconds. Defaults to 100ms.")
+                        .returns(builderClassName)
+                        .addParameter(TypeName.LONG, RETRY_BASE_DELAY_FIELD.name)
+                        .addStatement("this.$L = $L", RETRY_BASE_DELAY_FIELD.name, RETRY_BASE_DELAY_FIELD.name)
+                        .addStatement("return this")
+                        .build())
+                .addMethod(MethodSpec.methodBuilder(RETRY_MAX_DELAY_FIELD.name)
+                        .addModifiers(Modifier.PUBLIC)
+                        .addJavadoc("Override the maximum delay for exponential backoff in milliseconds. Defaults to 10 seconds.")
+                        .returns(builderClassName)
+                        .addParameter(TypeName.LONG, RETRY_MAX_DELAY_FIELD.name)
+                        .addStatement("this.$L = $L", RETRY_MAX_DELAY_FIELD.name, RETRY_MAX_DELAY_FIELD.name)
                         .addStatement("return this")
                         .build())
                 .addMethod(MethodSpec.methodBuilder(OKHTTP_CLIENT_FIELD.name)
@@ -672,13 +710,15 @@ public final class ClientOptionsGenerator extends AbstractFileGenerator {
                 environmentField.name,
                 HEADERS_FIELD.name,
                 HEADER_SUPPLIERS_FIELD.name,
-                OKHTTP_CLIENT_FIELD.name);
+                OKHTTP_CLIENT_FIELD.name,
+                RETRY_BASE_DELAY_FIELD.name,
+                RETRY_MAX_DELAY_FIELD.name);
 
-        String returnString = "return new $T($L, $L, $L, $L, this.timeout.get()";
+        String returnString = "return new $T($L, $L, $L, $L, this.timeout.get(), this.$L, this.$L";
 
         if (clientGeneratorContext.getIr().getApiVersion().isPresent()) {
             argsBuilder.add(apiVersionField.name);
-            returnString = "return new $T($L, $L, $L, $L, this.timeout.get(), $L";
+            returnString = "return new $T($L, $L, $L, $L, this.timeout.get(), this.$L, this.$L, $L";
         }
 
         Object[] args = argsBuilder.build().toArray();
@@ -722,9 +762,11 @@ public final class ClientOptionsGenerator extends AbstractFileGenerator {
                         TimeUnit.class,
                         TimeUnit.class)
                 .addCode(
-                        ".addInterceptor(new $T(this.$L));\n",
+                        ".addInterceptor(new $T(this.$L, this.$L, this.$L));\n",
                         clientGeneratorContext.getPoetClassNameFactory().getRetryInterceptorClassName(),
-                        MAX_RETRIES_FIELD.name)
+                        MAX_RETRIES_FIELD.name,
+                        RETRY_BASE_DELAY_FIELD.name,
+                        RETRY_MAX_DELAY_FIELD.name)
                 .endControlFlow()
                 .addCode("\n")
                 .addStatement("this.$L = $L.build()", OKHTTP_CLIENT_FIELD.name, OKHTTP_CLIENT_FIELD.name + "Builder")
