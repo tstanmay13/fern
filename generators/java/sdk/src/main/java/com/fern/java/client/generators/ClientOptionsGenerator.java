@@ -84,6 +84,14 @@ public final class ClientOptionsGenerator extends AbstractFileGenerator {
                     TypeName.INT, "maxRetries", Modifier.PRIVATE, Modifier.FINAL)
             .build();
 
+    private static final FieldSpec MAX_IDLE_CONNECTIONS_FIELD = FieldSpec.builder(
+                    TypeName.INT, "maxIdleConnections", Modifier.PRIVATE, Modifier.FINAL)
+            .build();
+
+    private static final FieldSpec KEEP_ALIVE_DURATION_FIELD = FieldSpec.builder(
+                    TypeName.LONG, "keepAliveDuration", Modifier.PRIVATE, Modifier.FINAL)
+            .build();
+
     private final ClassName builderClassName;
     private final FieldSpec environmentField;
     private final GeneratedJavaFile requestOptionsFile;
@@ -142,6 +150,10 @@ public final class ClientOptionsGenerator extends AbstractFileGenerator {
                         .build())
                 .addParameter(ParameterSpec.builder(TIMEOUT_FIELD.type, TIMEOUT_FIELD.name)
                         .build())
+                .addParameter(ParameterSpec.builder(MAX_IDLE_CONNECTIONS_FIELD.type, MAX_IDLE_CONNECTIONS_FIELD.name)
+                        .build())
+                .addParameter(ParameterSpec.builder(KEEP_ALIVE_DURATION_FIELD.type, KEEP_ALIVE_DURATION_FIELD.name)
+                        .build())
                 .addParameters(variableFields.values().stream()
                         .map(fieldSpec -> ParameterSpec.builder(fieldSpec.type, fieldSpec.name)
                                 .build())
@@ -158,7 +170,9 @@ public final class ClientOptionsGenerator extends AbstractFileGenerator {
                         platformHeadersPutString)
                 .addStatement("this.$L = $L", HEADER_SUPPLIERS_FIELD.name, HEADER_SUPPLIERS_FIELD.name)
                 .addStatement("this.$L = $L", OKHTTP_CLIENT_FIELD.name, OKHTTP_CLIENT_FIELD.name)
-                .addStatement("this.$L = $L", TIMEOUT_FIELD.name, TIMEOUT_FIELD.name);
+                .addStatement("this.$L = $L", TIMEOUT_FIELD.name, TIMEOUT_FIELD.name)
+                .addStatement("this.$L = $L", MAX_IDLE_CONNECTIONS_FIELD.name, MAX_IDLE_CONNECTIONS_FIELD.name)
+                .addStatement("this.$L = $L", KEEP_ALIVE_DURATION_FIELD.name, KEEP_ALIVE_DURATION_FIELD.name);
 
         addApiVersionToConstructor(constructorBuilder);
 
@@ -173,6 +187,8 @@ public final class ClientOptionsGenerator extends AbstractFileGenerator {
                 .addField(HEADER_SUPPLIERS_FIELD)
                 .addField(OKHTTP_CLIENT_FIELD)
                 .addField(TIMEOUT_FIELD)
+                .addField(MAX_IDLE_CONNECTIONS_FIELD)
+                .addField(KEEP_ALIVE_DURATION_FIELD)
                 .addFields(variableFields.values())
                 .addMethod(constructorBuilder.build())
                 .addMethod(environmentGetter)
@@ -422,6 +438,12 @@ public final class ClientOptionsGenerator extends AbstractFileGenerator {
                                 Modifier.PRIVATE)
                         .initializer("$T.empty()", Optional.class)
                         .build())
+                .addField(FieldSpec.builder(TypeName.INT, MAX_IDLE_CONNECTIONS_FIELD.name, Modifier.PRIVATE)
+                        .initializer("5")
+                        .build())
+                .addField(FieldSpec.builder(TypeName.LONG, KEEP_ALIVE_DURATION_FIELD.name, Modifier.PRIVATE)
+                        .initializer("5L")
+                        .build())
                 .addField(FieldSpec.builder(OkHttpClient.class, OKHTTP_CLIENT_FIELD.name, Modifier.PRIVATE)
                         .initializer(CodeBlock.builder().add("null").build())
                         .build())
@@ -453,6 +475,22 @@ public final class ClientOptionsGenerator extends AbstractFileGenerator {
                         .returns(builderClassName)
                         .addParameter(TypeName.INT, MAX_RETRIES_FIELD.name)
                         .addStatement("this.$L = $L", MAX_RETRIES_FIELD.name, MAX_RETRIES_FIELD.name)
+                        .addStatement("return this")
+                        .build())
+                .addMethod(MethodSpec.methodBuilder(MAX_IDLE_CONNECTIONS_FIELD.name)
+                        .addModifiers(Modifier.PUBLIC)
+                        .addJavadoc("Override the maximum number of idle connections in the pool. Defaults to 5.")
+                        .returns(builderClassName)
+                        .addParameter(TypeName.INT, MAX_IDLE_CONNECTIONS_FIELD.name)
+                        .addStatement("this.$L = $L", MAX_IDLE_CONNECTIONS_FIELD.name, MAX_IDLE_CONNECTIONS_FIELD.name)
+                        .addStatement("return this")
+                        .build())
+                .addMethod(MethodSpec.methodBuilder(KEEP_ALIVE_DURATION_FIELD.name)
+                        .addModifiers(Modifier.PUBLIC)
+                        .addJavadoc("Override the keep alive duration for connections in minutes. Defaults to 5 minutes.")
+                        .returns(builderClassName)
+                        .addParameter(TypeName.LONG, KEEP_ALIVE_DURATION_FIELD.name)
+                        .addStatement("this.$L = $L", KEEP_ALIVE_DURATION_FIELD.name, KEEP_ALIVE_DURATION_FIELD.name)
                         .addStatement("return this")
                         .build())
                 .addMethod(MethodSpec.methodBuilder(OKHTTP_CLIENT_FIELD.name)
@@ -672,13 +710,15 @@ public final class ClientOptionsGenerator extends AbstractFileGenerator {
                 environmentField.name,
                 HEADERS_FIELD.name,
                 HEADER_SUPPLIERS_FIELD.name,
-                OKHTTP_CLIENT_FIELD.name);
+                OKHTTP_CLIENT_FIELD.name,
+                MAX_IDLE_CONNECTIONS_FIELD.name,
+                KEEP_ALIVE_DURATION_FIELD.name);
 
-        String returnString = "return new $T($L, $L, $L, $L, this.timeout.get()";
+        String returnString = "return new $T($L, $L, $L, $L, this.timeout.get(), this.$L, this.$L";
 
         if (clientGeneratorContext.getIr().getApiVersion().isPresent()) {
             argsBuilder.add(apiVersionField.name);
-            returnString = "return new $T($L, $L, $L, $L, this.timeout.get(), $L";
+            returnString = "return new $T($L, $L, $L, $L, this.timeout.get(), this.$L, this.$L, $L";
         }
 
         Object[] args = argsBuilder.build().toArray();
@@ -693,6 +733,14 @@ public final class ClientOptionsGenerator extends AbstractFileGenerator {
                         OKHTTP_CLIENT_FIELD.name,
                         OKHTTP_CLIENT_FIELD.name,
                         OKHTTP_CLIENT_FIELD.type)
+                .addCode("\n")
+                .addStatement(
+                        "$L.connectionPool(new $T($L, $L, $T.MINUTES))",
+                        OKHTTP_CLIENT_FIELD.name + "Builder",
+                        ClassName.get("okhttp3", "ConnectionPool"),
+                        MAX_IDLE_CONNECTIONS_FIELD.name,
+                        KEEP_ALIVE_DURATION_FIELD.name,
+                        TimeUnit.class)
                 .addCode("\n")
                 .beginControlFlow("if (this.$L != null)", OKHTTP_CLIENT_FIELD.name)
                 .addStatement(
