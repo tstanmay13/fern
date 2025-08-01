@@ -34,6 +34,8 @@ import javax.lang.model.element.Modifier;
 public final class SuppliersGenerator extends AbstractFileGenerator {
 
     public static final String MEMOIZE_METHOD_NAME = "memoize";
+    
+    // Helper method for thread-safe memoization
 
     public SuppliersGenerator(AbstractGeneratorContext<?, ?> generatorContext) {
         super(generatorContext.getPoetClassNameFactory().getCoreClassName("Suppliers"), generatorContext);
