@@ -43,6 +43,7 @@ public class OAuthTokenSupplierGenerator extends AbstractFileGenerator {
     private static final String EXPIRES_AT_FIELD_NAME = "expiresAt";
     private static final String BUFFER_IN_MINUTES_CONSTANT_NAME = "BUFFER_IN_MINUTES";
     private static final String EXPIRES_IN_SECONDS_PARAMETER_NAME = "expiresInSeconds";
+    private static final String SCOPES_FIELD_NAME = "scopes";
 
     private static final String FETCH_TOKEN_METHOD_NAME = "fetchToken";
     private static final String GET_METHOD_NAME = "get";
@@ -158,14 +159,30 @@ public class OAuthTokenSupplierGenerator extends AbstractFileGenerator {
                         "return $S + $L",
                         clientCredentials.getTokenPrefix().orElse("Bearer") + " ",
                         ACCESS_TOKEN_FIELD_NAME);
+        boolean hasScopes = clientCredentials.getScopes().isPresent() 
+                && !clientCredentials.getScopes().get().isEmpty();
+        
         MethodSpec.Builder constructorBuilder = MethodSpec.constructorBuilder()
                 .addModifiers(Modifier.PUBLIC)
                 .addParameter(String.class, CLIENT_ID_FIELD_NAME)
-                .addParameter(String.class, CLIENT_SECRET_FIELD_NAME)
+                .addParameter(String.class, CLIENT_SECRET_FIELD_NAME);
+        
+        if (hasScopes) {
+            constructorBuilder.addParameter(
+                    ParameterizedTypeName.get(ClassName.get(java.util.List.class), ClassName.get(String.class)),
+                    SCOPES_FIELD_NAME);
+        }
+        
+        constructorBuilder
                 .addParameter(authClientClassName, AUTH_CLIENT_NAME)
                 .addStatement("this.$L = $L", CLIENT_ID_FIELD_NAME, CLIENT_ID_FIELD_NAME)
-                .addStatement("this.$L = $L", CLIENT_SECRET_FIELD_NAME, CLIENT_SECRET_FIELD_NAME)
-                .addStatement("this.$L = $L", AUTH_CLIENT_NAME, AUTH_CLIENT_NAME);
+                .addStatement("this.$L = $L", CLIENT_SECRET_FIELD_NAME, CLIENT_SECRET_FIELD_NAME);
+        
+        if (hasScopes) {
+            constructorBuilder.addStatement("this.$L = $L", SCOPES_FIELD_NAME, SCOPES_FIELD_NAME);
+        }
+        
+        constructorBuilder.addStatement("this.$L = $L", AUTH_CLIENT_NAME, AUTH_CLIENT_NAME);
         if (refreshRequired) {
             constructorBuilder.addStatement("this.$L = $T.now()", EXPIRES_AT_FIELD_NAME, Instant.class);
         }
@@ -175,7 +192,15 @@ public class OAuthTokenSupplierGenerator extends AbstractFileGenerator {
                 .addField(FieldSpec.builder(String.class, CLIENT_ID_FIELD_NAME, Modifier.PRIVATE, Modifier.FINAL)
                         .build())
                 .addField(FieldSpec.builder(String.class, CLIENT_SECRET_FIELD_NAME, Modifier.PRIVATE, Modifier.FINAL)
-                        .build())
+                        .build());
+        
+        if (hasScopes) {
+            oauthTypeSpecBuilder.addField(FieldSpec.builder(
+                    ParameterizedTypeName.get(ClassName.get(java.util.List.class), ClassName.get(String.class)),
+                    SCOPES_FIELD_NAME, Modifier.PRIVATE, Modifier.FINAL).build());
+        }
+        
+        oauthTypeSpecBuilder
                 .addField(FieldSpec.builder(authClientClassName, AUTH_CLIENT_NAME, Modifier.PRIVATE, Modifier.FINAL)
                         .build())
                 .addField(FieldSpec.builder(String.class, ACCESS_TOKEN_FIELD_NAME, Modifier.PRIVATE)
@@ -184,20 +209,12 @@ public class OAuthTokenSupplierGenerator extends AbstractFileGenerator {
                 .addMethod(MethodSpec.methodBuilder(FETCH_TOKEN_METHOD_NAME)
                         .addModifiers(Modifier.PUBLIC)
                         .returns(fetchTokenReturnType)
-                        .addStatement(
-                                "$T $L = $T.builder().$L($L).$L($L).build()",
-                                fetchTokenRequestType,
-                                GET_TOKEN_REQUEST_NAME,
+                        .addCode(buildFetchTokenMethodBody(
                                 fetchTokenRequestType,
                                 clientIdPropertyName,
-                                CLIENT_ID_FIELD_NAME,
                                 clientSecretPropertyName,
-                                CLIENT_SECRET_FIELD_NAME)
-                        .addStatement(
-                                "return $L.$L($L)",
-                                AUTH_CLIENT_NAME,
-                                httpEndpoint.getName().get().getCamelCase().getUnsafeName(),
-                                GET_TOKEN_REQUEST_NAME)
+                                hasScopes,
+                                httpEndpoint.getName().get().getCamelCase().getUnsafeName()))
                         .build())
                 .addMethod(getMethodSpecBuilder.build());
         if (refreshRequired) {
@@ -236,8 +253,42 @@ public class OAuthTokenSupplierGenerator extends AbstractFileGenerator {
     private static void validateSupportedConfiguration(OAuthClientCredentials clientCredentials) {
         if (clientCredentials.getRefreshEndpoint().isPresent())
             throw new RuntimeException("Refresh endpoints not supported");
-        if (clientCredentials.getScopes().isPresent()
-                && !clientCredentials.getScopes().get().isEmpty()) throw new RuntimeException("Scopes not supported");
+        // Scopes are now supported - removed validation
+    }
+    
+    private CodeBlock buildFetchTokenMethodBody(
+            TypeName fetchTokenRequestType,
+            String clientIdPropertyName,
+            String clientSecretPropertyName,
+            boolean hasScopes,
+            String endpointMethodName) {
+        CodeBlock.Builder builder = CodeBlock.builder();
+        
+        // Start building the request
+        builder.addStatement(
+                "$T.Builder requestBuilder = $T.builder().$L($L).$L($L)",
+                fetchTokenRequestType,
+                fetchTokenRequestType,
+                clientIdPropertyName,
+                CLIENT_ID_FIELD_NAME,
+                clientSecretPropertyName,
+                CLIENT_SECRET_FIELD_NAME);
+        
+        // Add scopes if present
+        if (hasScopes) {
+            builder.beginControlFlow("if (this.$L != null && !this.$L.isEmpty())", SCOPES_FIELD_NAME, SCOPES_FIELD_NAME);
+            builder.addStatement("requestBuilder.scopes(String.join(\" \", this.$L))", SCOPES_FIELD_NAME);
+            builder.endControlFlow();
+        }
+        
+        builder.addStatement("$T $L = requestBuilder.build()", fetchTokenRequestType, GET_TOKEN_REQUEST_NAME);
+        builder.addStatement(
+                "return $L.$L($L)",
+                AUTH_CLIENT_NAME,
+                endpointMethodName,
+                GET_TOKEN_REQUEST_NAME);
+        
+        return builder.build();
     }
 
     private TypeName getFetchTokenRequestType(HttpEndpoint httpEndpoint, HttpService httpService) {
